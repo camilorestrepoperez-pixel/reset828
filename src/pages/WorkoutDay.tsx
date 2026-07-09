@@ -5,6 +5,8 @@ import { todayStr, weekdayIndex, formatDate, suggestProgression, DAY_NAMES, calc
 import { suggestLightDay } from '../services/garmin/garminHealthMapper'
 import { sendWorkoutToGarmin } from '../services/garmin/garminTrainingService'
 import { isSupported as bleSupported, connectHR, hrZone } from '../services/bluetoothHR'
+import { EXERCISE_LIBRARY, EXERCISE_CATS } from '../data/exerciseLibrary'
+import type { LibraryExercise } from '../types'
 import { buildMealSuggestion, DAY_TYPE_INFO } from '../lib/mealCoach'
 import { Card, Button, Chip, Modal, Input, Select, ProgressBar, Scale } from '../components/ui'
 import type { Exercise, ExerciseLog, SetLog, SessionMode, BlockType } from '../types'
@@ -34,6 +36,7 @@ export default function WorkoutDay() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editEx, setEditEx] = useState<Exercise | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [picker, setPicker] = useState<null | { replaceId?: string }>(null)
   const [dupTarget, setDupTarget] = useState('')
   const [garminMsg, setGarminMsg] = useState('')
 
@@ -268,6 +271,18 @@ export default function WorkoutDay() {
                           <Input type="number" inputMode="numeric" placeholder={ex.reps} value={st.reps} onChange={(e) => updateSet(ex, i, 'reps', e.target.value)} />
                         </div>
                       ))}
+                      <div className="flex gap-2">
+                        <button
+                          className="flex-1 text-[11px] text-mut border border-line rounded-lg py-1.5 hover:border-acid/50"
+                          onClick={() => s.saveExerciseLog(date, day.key, ex.id, { ...log, sets: [...log.sets, { reps: '', weight: '' }] })}
+                        >+ serie</button>
+                        {log.sets.length > 1 && (
+                          <button
+                            className="flex-1 text-[11px] text-mut border border-line rounded-lg py-1.5 hover:border-red-500/50"
+                            onClick={() => s.saveExerciseLog(date, day.key, ex.id, { ...log, sets: log.sets.slice(0, -1) })}
+                          >− serie</button>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -291,8 +306,13 @@ export default function WorkoutDay() {
                     />
                   )}
 
-                  <div className="flex gap-2">
-                    <Button variant="ghost" className="!py-1.5 !text-xs" onClick={() => setEditEx(ex)}>Editar ejercicio</Button>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="ghost" className="!py-1.5 !text-xs" onClick={() => setEditEx(ex)}>Editar</Button>
+                    <Button variant="ghost" className="!py-1.5 !text-xs" onClick={() => setPicker({ replaceId: ex.id })}>⇄ Reemplazar</Button>
+                    <Button variant="ghost" className="!py-1.5 !text-xs" onClick={() => {
+                      const { id: _id, ...rest } = ex
+                      s.addExercise(day.key, { ...rest, name: `${ex.name} (variante)` })
+                    }}>⧉ Duplicar</Button>
                     <Button variant="danger" className="!py-1.5 !text-xs" onClick={() => s.removeExercise(day.key, ex.id)}>Quitar</Button>
                   </div>
                 </div>
@@ -304,7 +324,35 @@ export default function WorkoutDay() {
         ))}
       </div>
 
-      <Button variant="ghost" className="w-full" onClick={() => setShowAdd(true)}>+ Agregar ejercicio</Button>
+      <Button variant="ghost" className="w-full" onClick={() => setPicker({})}>+ Agregar ejercicio</Button>
+
+      {/* Selector desde la biblioteca de ejercicios */}
+      <ExercisePicker
+        open={!!picker}
+        onClose={() => setPicker(null)}
+        onCustom={() => { setPicker(null); setShowAdd(true) }}
+        onPick={(lx) => {
+          const defaults: Omit<Exercise, 'id'> = {
+            name: lx.name,
+            muscle: lx.muscle,
+            sets: lx.type === 'fuerza' ? 3 : lx.type === 'funcional' ? 4 : 1,
+            reps: lx.unit === 'reps' ? '10' : lx.unit === 'tiempo' ? '20 min' : '5 km',
+            rest: lx.type === 'fuerza' ? '90s' : '—',
+            cue: lx.cue ?? '',
+            type: lx.type,
+            block: lx.type === 'cardio' ? 'cardio' : lx.type === 'movilidad' ? 'movilidad' : 'principal',
+            estMin: lx.type === 'fuerza' ? 8 : lx.type === 'funcional' ? 8 : 20,
+          }
+          if (picker?.replaceId) {
+            s.updateExercise(day.key, picker.replaceId, {
+              name: lx.name, muscle: lx.muscle, cue: lx.cue ?? '', type: lx.type,
+            })
+          } else {
+            s.addExercise(day.key, defaults)
+          }
+          setPicker(null)
+        }}
+      />
 
       {/* Nutrición cruzada con el entreno de hoy */}
       <Card className="border-acid/30">
@@ -467,16 +515,99 @@ function CardioCard({ date, dayKey }: { date: string; dayKey: string }) {
   const s = useStore()
   const cardio = s.sessions[date]?.cardio ?? {}
   const upd = (patch: Partial<typeof cardio>) => s.saveCardio(date, dayKey, { ...cardio, ...patch })
+
+  // Pace automático si hay tiempo y distancia (editable manualmente)
+  const autoPace =
+    cardio.time && cardio.distance
+      ? (() => {
+          const p = cardio.time / cardio.distance
+          return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, '0')}`
+        })()
+      : ''
+
   return (
     <Card>
-      <div className="text-sm font-semibold mb-3">🏃 Registro de cardio</div>
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-semibold">🏃 Registro de cardio</span>
+        <span className="text-[10px] text-mut">Fuente: manual (Garmin/Strava vía Conexiones)</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
         <Input label="Distancia (km)" type="number" inputMode="decimal" step="0.1" value={cardio.distance ?? ''} onChange={(e) => upd({ distance: e.target.value === '' ? undefined : +e.target.value })} />
         <Input label="Tiempo (min)" type="number" inputMode="numeric" value={cardio.time ?? ''} onChange={(e) => upd({ time: e.target.value === '' ? undefined : +e.target.value })} />
-        <Input label="Ritmo (min/km)" placeholder="6:10" value={cardio.pace ?? ''} onChange={(e) => upd({ pace: e.target.value })} />
+        <Input label="Ritmo (min/km)" placeholder={autoPace || '6:10'} value={cardio.pace ?? ''} onChange={(e) => upd({ pace: e.target.value })} />
+      </div>
+      {autoPace && !cardio.pace && (
+        <p className="text-[11px] text-mut mb-2">Ritmo calculado: <b className="text-acid">{autoPace} min/km</b> (escribe para corregirlo)</p>
+      )}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <Input label="Calorías quemadas" type="number" inputMode="numeric" placeholder="del reloj" value={cardio.calories ?? ''} onChange={(e) => upd({ calories: e.target.value === '' ? undefined : +e.target.value })} />
+        <Input label="FC promedio" type="number" inputMode="numeric" placeholder="ppm" value={cardio.avgHR ?? ''} onChange={(e) => upd({ avgHR: e.target.value === '' ? undefined : +e.target.value })} />
+        <Select label="Tipo de sesión" value={cardio.sessionType ?? ''} onChange={(e) => upd({ sessionType: (e.target.value || undefined) as typeof cardio.sessionType })}>
+          <option value="">—</option>
+          <option value="zona 2">Zona 2</option>
+          <option value="intervalos">Intervalos</option>
+          <option value="largo suave">Largo suave</option>
+          <option value="libre">Libre</option>
+        </Select>
       </div>
       <Scale label="Sensación (1 = fatal, 10 = volando)" value={cardio.feel} onChange={(v) => upd({ feel: v })} />
     </Card>
+  )
+}
+
+// Selector de ejercicios de la biblioteca (~120): buscar, filtrar, agregar o reemplazar
+function ExercisePicker({ open, onClose, onPick, onCustom }: {
+  open: boolean
+  onClose: () => void
+  onPick: (lx: LibraryExercise) => void
+  onCustom: () => void
+}) {
+  const [q, setQ] = useState('')
+  const [cat, setCat] = useState('todas')
+  const [equip, setEquip] = useState('todos')
+
+  const EQUIPS = [...new Set(EXERCISE_LIBRARY.map((x) => x.equip))]
+  const list = EXERCISE_LIBRARY.filter((x) => {
+    if (q && !x.name.toLowerCase().includes(q.toLowerCase()) && !x.muscle.toLowerCase().includes(q.toLowerCase())) return false
+    if (cat !== 'todas' && x.cat !== cat) return false
+    if (equip !== 'todos' && x.equip !== equip) return false
+    return true
+  })
+
+  return (
+    <Modal open={open} onClose={onClose} title="Elegir ejercicio">
+      <div className="space-y-3">
+        <Input placeholder='Buscar... ("press hombro", "curl", "remo")' value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+        <div className="flex gap-1.5 flex-wrap">
+          <select value={cat} onChange={(e) => setCat(e.target.value)} className="bg-card2 border border-line rounded-lg px-2 py-1 text-xs">
+            <option value="todas">Todos los grupos</option>
+            {EXERCISE_CATS.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <select value={equip} onChange={(e) => setEquip(e.target.value)} className="bg-card2 border border-line rounded-lg px-2 py-1 text-xs">
+            <option value="todos">Todo equipo</option>
+            {EQUIPS.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <span className="text-[11px] text-mut self-center ml-auto">{list.length} ejercicios</span>
+        </div>
+        <div className="max-h-72 overflow-y-auto space-y-1.5">
+          {list.slice(0, 50).map((x) => (
+            <button
+              key={x.id}
+              onClick={() => onPick(x)}
+              className="w-full flex items-center gap-2 bg-card2 rounded-lg px-3 py-2 text-left hover:border-acid/40 border border-transparent transition"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{x.name}</div>
+                <div className="text-[11px] text-mut">{x.cat} · {x.muscle}{x.secondary ? ` + ${x.secondary}` : ''} · {x.equip}</div>
+              </div>
+              <Chip>{x.type}</Chip>
+            </button>
+          ))}
+          {list.length === 0 && <p className="text-xs text-mut text-center py-4">Sin resultados.</p>}
+        </div>
+        <Button variant="ghost" className="w-full" onClick={onCustom}>+ Crear ejercicio personalizado</Button>
+      </div>
+    </Modal>
   )
 }
 

@@ -275,6 +275,69 @@ export default function Progress() {
         </div>
       </Card>
 
+      {/* Resumen de actividad — últimos 7 días */}
+      {(() => {
+        const week = Array.from({ length: 7 }, (_, i) => addDays(today, -6 + i))
+        const weekActs = activities.filter((a) => week.includes(a.date))
+        const km = Math.round(weekActs.reduce((a, x) => a + (x.distanceKm ?? 0), 0) * 10) / 10
+        const cardioMin = weekActs.filter((a) => a.type === 'running' || a.type === 'walking').reduce((a, x) => a + x.durationMin, 0)
+        const kcalBurned = weekActs.reduce((a, x) => a + (x.calories ?? 0), 0)
+        // Volumen de fuerza: Σ peso × reps de series completadas
+        let volume = 0
+        for (const d of week) {
+          const sess = s.sessions[d]
+          if (!sess) continue
+          for (const log of Object.values(sess.logs)) {
+            for (const st of log.sets) {
+              if (st.weight !== '' && st.reps !== '') volume += Number(st.weight) * Number(st.reps)
+            }
+          }
+        }
+        // Pasos promedio (fuente unificada)
+        const stepDays = week
+          .map((d) => {
+            const g = s.garmin.daily[d]?.steps ?? s.apple.daily[d]?.steps ?? s.checkIns[d]?.steps
+            return g
+          })
+          .filter((x): x is number => !!x)
+        const avgSteps = stepDays.length ? Math.round(stepDays.reduce((a, b) => a + b, 0) / stepDays.length) : 0
+        // Ejercicios más frecuentes (por nombre, series completadas)
+        const freq = new Map<string, number>()
+        for (const sess of Object.values(s.sessions)) {
+          const day = s.plan.find((d) => d.key === sess.dayKey)
+          for (const [exId, log] of Object.entries(sess.logs)) {
+            if (!log.completed) continue
+            const name = day?.exercises.find((e) => e.id === exId)?.name
+            if (name) freq.set(name, (freq.get(name) ?? 0) + 1)
+          }
+        }
+        const topEx = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        return (
+          <Card>
+            <CardTitle>Actividad — últimos 7 días</CardTitle>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mb-3">
+              {([
+                [`${volume >= 1000 ? `${Math.round(volume / 100) / 10}t` : `${Math.round(volume)}kg`}`, 'Volumen fuerza'],
+                [`${km}`, 'km recorridos'],
+                [`${cardioMin}`, 'min de cardio'],
+                [kcalBurned ? `${kcalBurned}` : '—', 'kcal quemadas'],
+              ] as const).map(([v, l]) => (
+                <div key={l} className="bg-card2 rounded-xl p-2.5">
+                  <div className="font-black text-lg">{v}</div>
+                  <div className="text-[10px] text-mut">{l}</div>
+                </div>
+              ))}
+            </div>
+            {avgSteps > 0 && <p className="text-xs text-mut mb-2">Pasos promedio: <b className="text-zinc-300">{avgSteps.toLocaleString('es-CO')}</b>/día</p>}
+            {topEx.length > 0 && (
+              <div className="text-xs text-mut">
+                Más frecuentes: {topEx.map(([n, c]) => `${n} (${c}×)`).join(' · ')}
+              </div>
+            )}
+          </Card>
+        )
+      })()}
+
       {/* Plan vs realizado */}
       <Card>
         <CardTitle>Plan vs realizado — últimos 7 días</CardTitle>

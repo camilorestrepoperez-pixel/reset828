@@ -62,9 +62,18 @@ export default function CheckIn() {
           <Toggle label="🍽️ Alimentación cumplida" value={c.nutritionDone} onChange={(v) => set('nutritionDone', v)} />
           <Toggle label="💧 Agua cumplida" value={c.waterDone} onChange={(v) => set('waterDone', v)} />
         </div>
-        <div className="mt-3">
-          <Input label="Pasos / actividad del día" type="number" inputMode="numeric" placeholder="Ej: 8500" value={c.steps ?? ''} onChange={(e) => set('steps', e.target.value === '' ? undefined : +e.target.value)} />
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Input label="Pasos del día" type="number" inputMode="numeric" placeholder="Ej: 8500" value={c.steps ?? ''} onChange={(e) => set('steps', e.target.value === '' ? undefined : +e.target.value)} />
+          <Input label="Calorías quemadas" type="number" inputMode="numeric" placeholder="del reloj o estimadas" value={c.caloriesBurned ?? ''} onChange={(e) => set('caloriesBurned', e.target.value === '' ? undefined : +e.target.value)} />
         </div>
+        {(s.garmin.daily[today] || s.apple.daily[today]) && (
+          <p className="text-[11px] text-mut mt-2">
+            📡 Sincronizado: {s.garmin.daily[today]
+              ? `${s.garmin.daily[today].steps.toLocaleString('es-CO')} pasos · ${s.garmin.daily[today].activeCalories} kcal (Garmin)`
+              : `${s.apple.daily[today]!.steps.toLocaleString('es-CO')} pasos · ${s.apple.daily[today]!.activeCalories} kcal (Apple Health)`}.
+            Deja los campos vacíos para usar eso — si escribes, tu dato manda (override manual).
+          </p>
+        )}
       </Card>
 
       <Card>

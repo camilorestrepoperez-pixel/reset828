@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { getDayInfo, STATUS_COLORS } from '../lib/calendar'
 import { recoveryStatus } from '../services/garmin/garminHealthMapper'
 import { dailyMetrics } from '../services/healthDataMapper'
+import { unifiedActivities, SOURCE_META } from '../services/unifiedActivityService'
 import { sendWorkoutToGarmin } from '../services/garmin/garminTrainingService'
 import { buildMealSuggestion } from '../lib/mealCoach'
 import { bmi, bmiClass } from '../lib/body'
@@ -241,6 +242,16 @@ export default function Dashboard() {
               ? '✅ Sesión completada'
               : `${doneExercises}/${workoutDay.exercises.length} ejercicios marcados`}
           </div>
+          {(() => {
+            const acts = unifiedActivities({ garmin: s.garmin, strava: s.strava, apple: s.apple, sessions: s.sessions, plan: s.plan })
+            const todayAct = acts.find((a) => a.date === today)
+            return todayAct ? (
+              <div className="text-xs mt-2 pt-2 border-t border-line/60">
+                <span className="text-mut">Real:</span> <span className="text-zinc-300">{todayAct.name}</span>
+                <span className="text-mut"> · {todayAct.durationMin} min{todayAct.calories ? ` · ${todayAct.calories} kcal` : ''} · {SOURCE_META[todayAct.source].icon} {SOURCE_META[todayAct.source].label}</span>
+              </div>
+            ) : null
+          })()}
           <div className="text-xs text-mut mt-2 pt-2 border-t border-line/60">
             Mañana: <span className="text-zinc-300">{nextWorkout.title}</span>
           </div>

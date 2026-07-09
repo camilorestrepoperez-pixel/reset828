@@ -4,6 +4,8 @@ import { useStore, workoutForDate, currentWeight, mealsForDate } from '../store/
 import { todayStr, addDays, weekStart, weekdayIndex, DAY_NAMES, formatDate, weekAdherence, calcTargets } from '../lib/calc'
 import { getDayInfo, monthGrid, STATUS_COLORS, STATUS_LABELS, MONTH_NAMES, type DayStatus } from '../lib/calendar'
 import { buildMealSuggestion, DAY_TYPE_INFO } from '../lib/mealCoach'
+import { unifiedActivities, SOURCE_META } from '../services/unifiedActivityService'
+import { dailyMetrics } from '../services/healthDataMapper'
 import { Card, CardTitle, Button, Chip, Modal, Select } from '../components/ui'
 
 const TYPE_ICONS: Record<string, string> = {
@@ -194,6 +196,29 @@ function DayDetailModal({ date, onClose }: { date: string | null; onClose: () =>
                 <div><span className="text-mut">Cena:</span> {sug.meals.cena?.name}</div>
                 {sug.postEntreno && <div><span className="text-mut">Post-entreno:</span> {sug.postEntreno.name}</div>}
               </div>
+            </div>
+          )
+        })()}
+
+        {/* Actividad real del día (todas las fuentes) */}
+        {(() => {
+          const acts = unifiedActivities({ garmin: s.garmin, strava: s.strava, apple: s.apple, sessions: s.sessions, plan: s.plan })
+            .filter((a) => a.date === date)
+          const m = dailyMetrics({ date, garmin: s.garmin, apple: s.apple, checkIn: s.checkIns[date] })
+          if (acts.length === 0 && m.source === 'ninguna') return null
+          return (
+            <div className="bg-card2 rounded-xl p-3 space-y-1">
+              <div className="text-xs text-mut uppercase tracking-wider mb-1">Actividad real</div>
+              {acts.map((a) => (
+                <div key={a.id} className="text-xs text-zinc-300">
+                  {a.name} · {a.durationMin} min{a.distanceKm ? ` · ${a.distanceKm} km` : ''}{a.calories ? ` · ${a.calories} kcal` : ''} · {SOURCE_META[a.source].icon}
+                </div>
+              ))}
+              {m.steps !== undefined && (
+                <div className="text-xs text-mut">
+                  {m.steps.toLocaleString('es-CO')} pasos · fuente: {m.source}{m.overrides.length > 0 ? ` (override: ${m.overrides.join(', ')})` : ''}
+                </div>
+              )}
             </div>
           )
         })()}

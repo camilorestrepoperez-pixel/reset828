@@ -161,6 +161,26 @@ export function buildMealSuggestion(opts: {
     alerts.push('Día de poca energía: comidas simples y fáciles de digerir. Rutina en modo ligero.')
   }
 
+  // ---- Vida real: alcohol, comidas pesadas, exceso de carbos — sin castigo ----
+  const hasAlcohol = todayMeals.some((m) =>
+    /cerveza|vino|ron|whisky|aguardiente|gin|margarita|c[oó]ctel/i.test(m.name),
+  )
+  if (hasAlcohol) {
+    alerts.push('Registraste alcohol — bien por anotarlo. Hidrátate (2 vasos de agua por trago), mete proteína magra y evita grasa alta el resto del día.')
+  }
+  const heavyItem = todayMeals.find((m) => m.kcal >= 550)
+  if (heavyItem && kcalLeft > 0 && kcalLeft < targets.kcal * 0.45) {
+    alerts.push(`"${heavyItem.name}" fue una comida grande. No pasa nada: cena ligera, proteína magra y una caminata de 20 min ordenan el día.`)
+  }
+  const carbsEaten = todayMeals.reduce((a, m) => a + m.carbs, 0)
+  if (carbsEaten > targets.carbs * 1.05) {
+    if (type === 'pierna' || type === 'running') {
+      alerts.push('Carbos por encima del objetivo — en día de pierna/running es aceptable. Prioriza proteína en la próxima comida.')
+    } else {
+      alerts.push('Carbos por encima del objetivo en un día sin entreno fuerte. Cena baja en carbohidrato: proteína + vegetales.')
+    }
+  }
+
   // Alternativas rápidas (2 que no estén ya sugeridas)
   const suggested = new Set([...Object.values(meals), preEntreno, postEntreno].filter(Boolean).map((r) => r!.id))
   const quick = POOL_POCO_TIEMPO.map(byNum).filter((r) => !suggested.has(r.id)).slice(0, 2)

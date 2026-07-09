@@ -53,6 +53,7 @@ interface State {
   updateProfile: (p: Partial<Profile>) => void
   addMeal: (m: Omit<MealEntry, 'id'>) => void
   removeMeal: (id: string) => void
+  updateMealQty: (id: string, newQty: number) => void
   repeatDay: (fromDate: string, toDate: string) => void
   addCustomFood: (f: Omit<Food, 'id' | 'custom'>) => void
   setWater: (date: string, glasses: number) => void
@@ -117,6 +118,15 @@ export const useStore = create<State>()(
 
       addMeal: (m) => set((s) => ({ meals: [...s.meals, { ...m, id: uid() }] })),
       removeMeal: (id) => set((s) => ({ meals: s.meals.filter((m) => m.id !== id) })),
+
+      updateMealQty: (id, newQty) =>
+        set((s) => ({
+          meals: s.meals.map((m) => {
+            if (m.id !== id || m.qty <= 0 || newQty <= 0) return m
+            const f = newQty / m.qty // macros guardados son totales: reescalar
+            return { ...m, qty: newQty, kcal: m.kcal * f, protein: m.protein * f, carbs: m.carbs * f, fat: m.fat * f }
+          }),
+        })),
 
       repeatDay: (fromDate, toDate) =>
         set((s) => ({

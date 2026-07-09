@@ -1,5 +1,7 @@
 export type MealType = 'desayuno' | 'almuerzo' | 'cena' | 'snack' | 'bebida'
 
+export type FoodNote = 'ideal' | 'ocasional' | 'alto en calorías' | 'útil post-entreno' | 'estimación'
+
 export interface Food {
   id: string
   name: string
@@ -11,6 +13,8 @@ export interface Food {
   fiber?: number
   category: string
   custom?: boolean
+  note?: FoodNote
+  tags?: string[]
 }
 
 export interface MealEntry {
@@ -68,6 +72,9 @@ export interface CardioLog {
   time?: number
   pace?: string
   feel?: number
+  calories?: number
+  avgHR?: number
+  sessionType?: 'zona 2' | 'intervalos' | 'largo suave' | 'libre'
 }
 
 export type SessionMode = 'normal' | 'rapida' | 'ligera'
@@ -93,7 +100,24 @@ export interface CheckIn {
   nutritionDone: boolean
   waterDone: boolean
   steps?: number
+  caloriesBurned?: number
   note?: string
+}
+
+// ---------- Biblioteca de ejercicios ----------
+export type ExerciseUnit = 'reps' | 'tiempo' | 'distancia'
+export type ExerciseEquip = 'barra' | 'mancuerna' | 'polea' | 'máquina' | 'peso corporal' | 'kettlebell' | 'banda' | 'cardio'
+
+export interface LibraryExercise {
+  id: string
+  name: string
+  cat: string // Pecho, Espalda, Hombro...
+  muscle: string
+  secondary?: string
+  type: ExerciseType
+  equip: ExerciseEquip
+  unit: ExerciseUnit
+  cue?: string
 }
 
 export interface Measurement {

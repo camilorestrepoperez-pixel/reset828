@@ -20,6 +20,22 @@ export default function Nutrition() {
   const [params] = useSearchParams()
   const [date, setDate] = useState(params.get('d') ?? todayStr())
   const [adding, setAdding] = useState<MealType | null>(null)
+  const [toast, setToast] = useState('')
+
+  // Mensaje de coach al registrar comida no ideal — cero juicio, puro control
+  const onFoodAdded = (food?: Food) => {
+    const nonIdeal = food && (food.note === 'ocasional' || food.note === 'alto en calorías' || food.category === 'Alcohol' || food.category === 'Comida fuera')
+    if (!nonIdeal) return
+    const msgs = [
+      'Registrarlo ya es ganar control.',
+      'No pasa nada. Ajustemos la cena.',
+      'Esto no es ideal para déficit, pero cabe si el día se ordena.',
+      'Compensa con proteína y una cena limpia.',
+      'No lo borres mentalmente. Regístralo y seguimos.',
+    ]
+    setToast(msgs[Math.floor(Math.random() * msgs.length)])
+    setTimeout(() => setToast(''), 3500)
+  }
   const weight = currentWeight(s)
   const targets = calcTargets(s.profile, weight)
   const macros = macrosForDate(s, date)
@@ -157,8 +173,22 @@ export default function Nutrition() {
               <div className="space-y-1.5">
                 {items.map((m) => (
                   <div key={m.id} className="flex items-center gap-2 text-sm bg-card2 rounded-lg px-3 py-2">
-                    <span className="flex-1 min-w-0 truncate">{m.name} {m.qty !== 1 && <span className="text-mut">×{m.qty}</span>}</span>
+                    <button
+                      className="flex-1 min-w-0 truncate text-left hover:text-acid transition"
+                      title="Editar cantidad"
+                      onClick={() => {
+                        const v = window.prompt(`Cantidad de "${m.name}" (porciones):`, String(m.qty))
+                        if (v && +v > 0) s.updateMealQty(m.id, +v)
+                      }}
+                    >
+                      {m.name} {m.qty !== 1 && <span className="text-mut">×{m.qty}</span>}
+                    </button>
                     <span className="text-xs text-mut whitespace-nowrap">{Math.round(m.kcal)} kcal · {Math.round(m.protein)}P</span>
+                    <button
+                      title="Duplicar"
+                      onClick={() => s.addMeal({ date, meal: m.meal, name: m.name, qty: m.qty, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat })}
+                      className="text-mut hover:text-acid px-1"
+                    >⧉</button>
                     <button onClick={() => s.removeMeal(m.id)} className="text-mut hover:text-red-400 px-1">×</button>
                   </div>
                 ))}
@@ -168,7 +198,13 @@ export default function Nutrition() {
         )
       })}
 
-      <AddFoodModal meal={adding} date={date} onClose={() => setAdding(null)} />
+      <AddFoodModal meal={adding} date={date} onClose={() => setAdding(null)} onAdded={onFoodAdded} />
+
+      {toast && (
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 bg-card border border-acid/50 text-zinc-100 text-sm font-medium px-4 py-2.5 rounded-xl z-50 shadow-lg max-w-sm text-center">
+          💬 {toast}
+        </div>
+      )}
     </div>
   )
 }
@@ -228,116 +264,248 @@ function SuggestionCard({ date }: { date: string }) {
   )
 }
 
-function AddFoodModal({ meal, date, onClose }: { meal: MealType | null; date: string; onClose: () => void }) {
+// ---------------- Modal de registro: la vida real, sin juzgar ----------------
+type Tab = 'sugeridos' | 'frecuentes' | 'alimentos' | 'fuera' | 'crear'
+
+const NOTE_TONE: Record<string, 'ok' | 'warn' | 'default' | 'acid'> = {
+  ideal: 'ok', 'útil post-entreno': 'acid', ocasional: 'warn', 'alto en calorías': 'warn', estimación: 'default',
+}
+
+function AddFoodModal({ meal, date, onClose, onAdded }: {
+  meal: MealType | null; date: string; onClose: () => void; onAdded: (f?: Food) => void
+}) {
   const s = useStore()
+  const [tab, setTab] = useState<Tab>('sugeridos')
   const [q, setQ] = useState('')
-  const [qty, setQty] = useState<Record<string, number>>({})
-  const [showCustom, setShowCustom] = useState(false)
+  const [cat, setCat] = useState('todas')
+  const [minProt, setMinProt] = useState(false)
+  const [lowKcal, setLowKcal] = useState(false)
+  const [selected, setSelected] = useState<Food | null>(null)
+  const [qty, setQty] = useState(1)
   const [custom, setCustom] = useState({ name: '', portion: '1 porción', kcal: '', protein: '', carbs: '', fat: '', category: 'Otro' })
   const foods = allFoods(s)
-  const filtered = foods.filter((f) => f.name.toLowerCase().includes(q.toLowerCase()))
 
-  const add = (f: Food) => {
-    const n = qty[f.id] ?? 1
-    s.addMeal({
-      date, meal: meal!, name: f.name, qty: n,
-      kcal: f.kcal * n, protein: f.protein * n, carbs: f.carbs * n, fat: f.fat * n,
-    })
-    onClose()
-    setQ('')
-  }
+  const reset = () => { setSelected(null); setQty(1); setQ('') }
+  const close = () => { reset(); setTab('sugeridos'); onClose() }
 
-  const saveCustom = () => {
-    const f = {
-      name: custom.name, portion: custom.portion,
-      kcal: +custom.kcal || 0, protein: +custom.protein || 0, carbs: +custom.carbs || 0, fat: +custom.fat || 0,
-      category: custom.category,
+  // Frecuentes: lo que más has registrado (historial real)
+  const frequents = (() => {
+    const count = new Map<string, { n: number; m: (typeof s.meals)[0] }>()
+    for (const m of s.meals) {
+      const e = count.get(m.name)
+      if (e) e.n++
+      else count.set(m.name, { n: 1, m })
     }
-    s.addCustomFood(f)
-    s.addMeal({ date, meal: meal!, name: f.name, qty: 1, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat })
-    setShowCustom(false)
-    setCustom({ name: '', portion: '1 porción', kcal: '', protein: '', carbs: '', fat: '', category: 'Otro' })
-    onClose()
+    return [...count.values()].sort((a, b) => b.n - a.n).slice(0, 10)
+  })()
+
+  const addFood = (f: Food, n: number) => {
+    s.addMeal({ date, meal: meal!, name: f.name, qty: n, kcal: f.kcal * n, protein: f.protein * n, carbs: f.carbs * n, fat: f.fat * n })
+    onAdded(f)
+    close()
   }
 
-  // Combos de un tap: rápidas predefinidas + favoritas guardadas del usuario
-  // Los items de favoritas/rápidas ya traen macros totales por porción
   const addItems = (items: FavMealItem[]) => {
     items.forEach((i) => s.addMeal({ date, meal: meal!, name: i.name, qty: i.qty, kcal: i.kcal, protein: i.protein, carbs: i.carbs, fat: i.fat }))
-    onClose()
+    onAdded()
+    close()
   }
+
+  const CATS = [...new Set(foods.map((f) => f.category))].sort()
+  const searchPool = tab === 'fuera' ? foods.filter((f) => f.category === 'Comida fuera') : foods
+  const filtered = searchPool.filter((f) => {
+    if (q && !f.name.toLowerCase().includes(q.toLowerCase())) return false
+    if (tab === 'alimentos') {
+      if (cat !== 'todas' && f.category !== cat) return false
+      if (minProt && f.protein < 15) return false
+      if (lowKcal && f.kcal > 150) return false
+    }
+    return true
+  })
+
   const quicks = QUICK_MEALS.filter((qm) => qm.meal === meal)
   const favs = s.favMeals.filter((f) => f.meal === meal)
 
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'sugeridos', label: '⭐' },
+    { key: 'frecuentes', label: 'Frecuentes' },
+    { key: 'alimentos', label: 'Alimentos' },
+    { key: 'fuera', label: 'Fuera' },
+    { key: 'crear', label: '+ Crear' },
+  ]
+
+  const foodRow = (f: Food) => (
+    <div key={f.id} className={`flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition ${selected?.id === f.id ? 'bg-acid/10 border border-acid/40' : 'bg-card2'}`}>
+      <button className="flex-1 min-w-0 text-left" onClick={() => { setSelected(f); setQty(1) }}>
+        <div className="text-sm font-medium truncate flex items-center gap-1.5">
+          {f.name}
+          {f.note && <Chip tone={NOTE_TONE[f.note] ?? 'default'}>{f.note}</Chip>}
+          {f.custom && <Chip tone="acid">propio</Chip>}
+        </div>
+        <div className="text-[11px] text-mut">{f.portion} · {f.kcal} kcal · {f.protein}P {f.carbs}C {f.fat}G</div>
+      </button>
+      <Button className="!py-1 !px-2.5 !text-xs shrink-0" onClick={() => addFood(f, 1)}>+</Button>
+    </div>
+  )
+
   return (
-    <Modal open={!!meal} onClose={onClose} title={`Agregar a ${meal ?? ''}`}>
-      {!showCustom ? (
-        <div className="space-y-3">
-          {(quicks.length > 0 || favs.length > 0) && q === '' && (
-            <div className="space-y-1.5">
-              {favs.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 bg-acid/5 border border-acid/20 rounded-lg px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">⭐ {f.name}</div>
-                    <div className="text-[11px] text-mut">
-                      {Math.round(f.items.reduce((a, i) => a + i.kcal, 0))} kcal · {Math.round(f.items.reduce((a, i) => a + i.protein, 0))}P · {f.items.length} items
-                    </div>
-                  </div>
-                  <button onClick={() => s.removeFavMeal(f.id)} className="text-zinc-600 hover:text-red-400 px-1">×</button>
-                  <Button className="!py-1 !px-2.5 !text-xs" onClick={() => addItems(f.items)}>+</Button>
-                </div>
-              ))}
-              {quicks.map((qm) => (
-                <div key={qm.id} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{qm.name}</div>
-                    <div className="text-[11px] text-mut">
-                      {Math.round(qm.items.reduce((a, i) => a + i.kcal, 0))} kcal · {Math.round(qm.items.reduce((a, i) => a + i.protein, 0))}P
-                    </div>
-                  </div>
-                  <Button className="!py-1 !px-2.5 !text-xs" onClick={() => addItems(qm.items)}>+</Button>
-                </div>
-              ))}
-              <div className="h-px bg-line my-1" />
-            </div>
-          )}
-          <Input placeholder="Buscar alimento... (pollo, arepa, avena)" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-          <div className="max-h-72 overflow-y-auto space-y-1.5">
-            {filtered.map((f) => (
-              <div key={f.id} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
+    <Modal open={!!meal} onClose={close} title={`Agregar a ${meal ?? ''}`}>
+      <div className="space-y-3">
+        {/* Tabs */}
+        <div className="flex gap-1 bg-card2 rounded-xl p-1 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); reset() }}
+              className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${tab === t.key ? 'bg-acid text-black' : 'text-mut'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab !== 'crear' && tab !== 'sugeridos' && (
+          <Input placeholder="Buscar... (pasta, empanada, cerveza)" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+        )}
+
+        {/* SUGERIDOS: favoritas + combos rápidos */}
+        {tab === 'sugeridos' && (
+          <div className="max-h-80 overflow-y-auto space-y-1.5">
+            {favs.length === 0 && quicks.length === 0 && (
+              <p className="text-xs text-mut text-center py-3">Guarda favoritas con ☆ en cada bloque. Mientras tanto, mira los combos:</p>
+            )}
+            {favs.map((f) => (
+              <div key={f.id} className="flex items-center gap-2 bg-acid/5 border border-acid/20 rounded-lg px-3 py-2">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{f.name} {f.custom && <Chip tone="acid">propio</Chip>}</div>
-                  <div className="text-[11px] text-mut">{f.portion} · {f.kcal} kcal · {f.protein}P {f.carbs}C {f.fat}G</div>
+                  <div className="text-sm font-medium truncate">⭐ {f.name}</div>
+                  <div className="text-[11px] text-mut">{Math.round(f.items.reduce((a, i) => a + i.kcal, 0))} kcal · {Math.round(f.items.reduce((a, i) => a + i.protein, 0))}P</div>
                 </div>
-                <input
-                  type="number" min={0.25} step={0.25}
-                  value={qty[f.id] ?? 1}
-                  onChange={(e) => setQty({ ...qty, [f.id]: +e.target.value })}
-                  className="w-14 bg-bg border border-line rounded-lg px-2 py-1 text-xs text-center"
-                />
-                <Button className="!py-1 !px-2.5 !text-xs" onClick={() => add(f)}>+</Button>
+                <button onClick={() => s.removeFavMeal(f.id)} className="text-zinc-600 hover:text-red-400 px-1">×</button>
+                <Button className="!py-1 !px-2.5 !text-xs" onClick={() => addItems(f.items)}>+</Button>
               </div>
             ))}
-            {filtered.length === 0 && <div className="text-xs text-mut text-center py-4">Sin resultados. Créalo abajo. 👇</div>}
+            {quicks.map((qm) => (
+              <div key={qm.id} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{qm.name}</div>
+                  <div className="text-[11px] text-mut">{Math.round(qm.items.reduce((a, i) => a + i.kcal, 0))} kcal · {Math.round(qm.items.reduce((a, i) => a + i.protein, 0))}P</div>
+                </div>
+                <Button className="!py-1 !px-2.5 !text-xs" onClick={() => addItems(qm.items)}>+</Button>
+              </div>
+            ))}
           </div>
-          <Button variant="ghost" className="w-full" onClick={() => setShowCustom(true)}>+ Crear alimento personalizado</Button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <Input label="Nombre" value={custom.name} onChange={(e) => setCustom({ ...custom, name: e.target.value })} />
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Porción" value={custom.portion} onChange={(e) => setCustom({ ...custom, portion: e.target.value })} />
-            <Input label="Calorías" type="number" value={custom.kcal} onChange={(e) => setCustom({ ...custom, kcal: e.target.value })} />
-            <Input label="Proteína (g)" type="number" value={custom.protein} onChange={(e) => setCustom({ ...custom, protein: e.target.value })} />
-            <Input label="Carbos (g)" type="number" value={custom.carbs} onChange={(e) => setCustom({ ...custom, carbs: e.target.value })} />
-            <Input label="Grasas (g)" type="number" value={custom.fat} onChange={(e) => setCustom({ ...custom, fat: e.target.value })} />
+        )}
+
+        {/* FRECUENTES: historial real */}
+        {tab === 'frecuentes' && (
+          <div className="max-h-80 overflow-y-auto space-y-1.5">
+            {frequents.length === 0 && <p className="text-xs text-mut text-center py-3">Aún no hay historial. Lo que registres seguido aparecerá aquí.</p>}
+            {frequents
+              .filter(({ m }) => !q || m.name.toLowerCase().includes(q.toLowerCase()))
+              .map(({ n, m }) => {
+                const per = m.qty > 0 ? { kcal: m.kcal / m.qty, protein: m.protein / m.qty, carbs: m.carbs / m.qty, fat: m.fat / m.qty } : m
+                return (
+                  <div key={m.name} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{m.name}</div>
+                      <div className="text-[11px] text-mut">{Math.round(per.kcal)} kcal · {Math.round(per.protein)}P · registrado {n}×</div>
+                    </div>
+                    <Button
+                      className="!py-1 !px-2.5 !text-xs"
+                      onClick={() => {
+                        s.addMeal({ date, meal: meal!, name: m.name, qty: 1, kcal: per.kcal, protein: per.protein, carbs: per.carbs, fat: per.fat })
+                        onAdded()
+                        close()
+                      }}
+                    >+</Button>
+                  </div>
+                )
+              })}
           </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" className="flex-1" onClick={() => setShowCustom(false)}>Volver</Button>
-            <Button className="flex-1" disabled={!custom.name || !custom.kcal} onClick={saveCustom}>Guardar y agregar</Button>
+        )}
+
+        {/* ALIMENTOS: base completa con filtros */}
+        {tab === 'alimentos' && (
+          <>
+            <div className="flex gap-1.5 flex-wrap">
+              <select value={cat} onChange={(e) => setCat(e.target.value)} className="bg-card2 border border-line rounded-lg px-2 py-1 text-xs">
+                <option value="todas">Todas las categorías</option>
+                {CATS.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <button onClick={() => setMinProt(!minProt)} className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${minProt ? 'bg-acid text-black border-acid' : 'bg-card2 border-line text-mut'}`}>🥩 ≥15g prot</button>
+              <button onClick={() => setLowKcal(!lowKcal)} className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${lowKcal ? 'bg-acid text-black border-acid' : 'bg-card2 border-line text-mut'}`}>🔻 ≤150 kcal</button>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-1.5">
+              {filtered.slice(0, 60).map(foodRow)}
+              {filtered.length === 0 && (
+                <div className="text-xs text-mut text-center py-4">
+                  Sin resultados. <button className="text-acid font-semibold" onClick={() => setTab('crear')}>Créalo →</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* FUERA DE CASA */}
+        {tab === 'fuera' && (
+          <>
+            <p className="text-[11px] text-mut">Estimaciones promedio (±20%). Ajusta la porción si fue más o menos.</p>
+            <div className="max-h-64 overflow-y-auto space-y-1.5">{filtered.map(foodRow)}</div>
+          </>
+        )}
+
+        {/* Panel de porción del alimento seleccionado */}
+        {selected && tab !== 'crear' && (
+          <div className="border-t border-line pt-3 space-y-2">
+            <div className="text-sm font-semibold truncate">{selected.name}</div>
+            <div className="flex gap-1.5 items-center">
+              {[0.5, 1, 1.5, 2].map((n) => (
+                <button key={n} onClick={() => setQty(n)} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${qty === n ? 'bg-acid text-black border-acid' : 'bg-card2 border-line text-mut'}`}>
+                  ×{n}
+                </button>
+              ))}
+              <input
+                type="number" min={0.1} step={0.1} value={qty}
+                onChange={(e) => setQty(Math.max(0.1, +e.target.value || 1))}
+                className="w-16 bg-card2 border border-line rounded-lg px-2 py-2 text-xs text-center"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs bg-card2 rounded-lg px-3 py-2">
+              <span className="text-mut">{qty} × {selected.portion}</span>
+              <span className="font-bold">{Math.round(selected.kcal * qty)} kcal · {Math.round(selected.protein * qty)}P {Math.round(selected.carbs * qty)}C {Math.round(selected.fat * qty)}G</span>
+            </div>
+            <Button className="w-full" onClick={() => addFood(selected, qty)}>Agregar {qty !== 1 ? `×${qty}` : ''}</Button>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* CREAR PERSONALIZADO */}
+        {tab === 'crear' && (
+          <div className="space-y-3">
+            <Input label="Nombre" value={custom.name} onChange={(e) => setCustom({ ...custom, name: e.target.value })} autoFocus />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Porción" value={custom.portion} onChange={(e) => setCustom({ ...custom, portion: e.target.value })} />
+              <Input label="Calorías" type="number" value={custom.kcal} onChange={(e) => setCustom({ ...custom, kcal: e.target.value })} />
+              <Input label="Proteína (g)" type="number" value={custom.protein} onChange={(e) => setCustom({ ...custom, protein: e.target.value })} />
+              <Input label="Carbos (g)" type="number" value={custom.carbs} onChange={(e) => setCustom({ ...custom, carbs: e.target.value })} />
+              <Input label="Grasas (g)" type="number" value={custom.fat} onChange={(e) => setCustom({ ...custom, fat: e.target.value })} />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!custom.name || !custom.kcal}
+              onClick={() => {
+                const f = { name: custom.name, portion: custom.portion, kcal: +custom.kcal || 0, protein: +custom.protein || 0, carbs: +custom.carbs || 0, fat: +custom.fat || 0, category: custom.category }
+                s.addCustomFood(f)
+                s.addMeal({ date, meal: meal!, name: f.name, qty: 1, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat })
+                onAdded()
+                setCustom({ name: '', portion: '1 porción', kcal: '', protein: '', carbs: '', fat: '', category: 'Otro' })
+                close()
+              }}
+            >
+              Guardar y agregar
+            </Button>
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

@@ -4,6 +4,7 @@ import { todayStr, addDays, weekStart } from '../lib/calc'
 import * as garminAuth from '../services/garmin/garminAuthService'
 import { sync as garminSync } from '../services/garmin/garminSyncService'
 import { sendWorkoutToGarmin, sendWeekToGarmin } from '../services/garmin/garminTrainingService'
+import { parseGarminCsv } from '../services/garmin/garminCsvImport'
 import * as stravaSvc from '../services/strava/stravaService'
 import * as appleSvc from '../services/appleHealth/appleHealthService'
 import { ACTIVITY_META, activitySummary } from '../services/garmin/garminActivityMapper'
@@ -80,6 +81,21 @@ export default function Garmin() {
     setBusy(false)
   }
 
+  // ---- Importar CSV de Garmin Connect (sin API, gratis) ----
+  const importCsv = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const res = parseGarminCsv(String(reader.result))
+      if (res.ok) {
+        s.applyGarminSync({}, res.activities, new Date().toISOString())
+        setGMsg(`✓ ${res.message}`)
+      } else {
+        setGMsg(res.message)
+      }
+    }
+    reader.readAsText(file)
+  }
+
   // ---- Strava ----
   const stConnect = () => {
     const res = stravaSvc.startAuth()
@@ -130,6 +146,22 @@ export default function Garmin() {
                 <Button variant="ghost" className="!text-xs" disabled={busy} onClick={gSendWeek}>📅 Enviar plan semanal</Button>
               </div>
             )}
+            {/* Importación manual: la vía gratis sin API */}
+            <div className="mt-3 pt-3 border-t border-line/60">
+              <label className="inline-block rounded-xl px-4 py-2 text-xs font-semibold bg-card2 text-zinc-200 border border-line hover:border-acid/50 cursor-pointer transition">
+                📥 Importar CSV de Garmin Connect
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files?.[0]) importCsv(e.target.files[0]); e.target.value = '' }}
+                />
+              </label>
+              <p className="text-[11px] text-mut mt-1.5">
+                Gratis y sin API: en <b>connect.garmin.com</b> → Actividades → Todas las actividades → Exportar CSV.
+                Tus entrenos reales entran a "Plan vs realizado" y Progreso.
+              </p>
+            </div>
           </>
         }
       >

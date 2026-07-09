@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useStore, workoutForDate, currentWeight, macrosForDate, mealsForDate } from '../store/useStore'
 import { todayStr, weekdayIndex, formatDate, suggestProgression, DAY_NAMES, calcTargets } from '../lib/calc'
 import { suggestLightDay } from '../services/garmin/garminHealthMapper'
 import { sendWorkoutToGarmin } from '../services/garmin/garminTrainingService'
+import { isSupported as bleSupported, connectHR, hrZone } from '../services/bluetoothHR'
 import { buildMealSuggestion, DAY_TYPE_INFO } from '../lib/mealCoach'
 import { Card, Button, Chip, Modal, Input, Select, ProgressBar, Scale } from '../components/ui'
 import type { Exercise, ExerciseLog, SetLog, SessionMode, BlockType } from '../types'
@@ -359,6 +360,9 @@ export default function WorkoutDay() {
         <p className="text-[11px] text-mut mt-2">Copia todos los ejercicios de hoy al día elegido (reemplaza los que tenga).</p>
       </Card>
 
+      {/* FC en vivo desde el reloj (Web Bluetooth) */}
+      <LiveHRCard age={s.profile.age} />
+
       {/* Registro de cardio del día */}
       {isCardioDay && <CardioCard date={date} dayKey={day.key} />}
 
@@ -374,6 +378,88 @@ export default function WorkoutDay() {
         }}
       />
     </div>
+  )
+}
+
+// FC en vivo: el Garmin transmite como sensor Bluetooth estándar
+// (en el reloj: Configuración → Sensores → Transmitir frecuencia cardiaca)
+function LiveHRCard({ age }: { age: number }) {
+  const [bpm, setBpm] = useState<number | null>(null)
+  const [status, setStatus] = useState<'off' | 'connecting' | 'on'>('off')
+  const [msg, setMsg] = useState('')
+  const [deviceName, setDeviceName] = useState('')
+  const disconnectRef = useRef<(() => void) | undefined>(undefined)
+
+  // desconectar al salir de la página
+  useEffect(() => () => disconnectRef.current?.(), [])
+
+  if (!bleSupported()) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold mb-1">❤️ FC en vivo</div>
+        <p className="text-xs text-mut">
+          Este navegador no soporta Web Bluetooth. Para ver tu frecuencia cardiaca en vivo desde el Garmin,
+          abre la app en <b>Chrome (Android o PC)</b>. En iPhone/Safari no está disponible.
+        </p>
+      </Card>
+    )
+  }
+
+  const connect = async () => {
+    setStatus('connecting')
+    setMsg('Activa en tu reloj: Configuración → Sensores → Transmitir frecuencia cardiaca. Luego selecciónalo en la lista.')
+    const res = await connectHR(
+      (v) => { setBpm(v); setStatus('on') },
+      () => { setStatus('off'); setBpm(null); setMsg('Reloj desconectado.') },
+    )
+    if (res.ok) {
+      disconnectRef.current = res.disconnect
+      setDeviceName(res.deviceName ?? '')
+      setMsg('')
+    } else {
+      setStatus('off')
+      setMsg(res.message ?? '')
+    }
+  }
+
+  const disconnect = () => {
+    disconnectRef.current?.()
+    setStatus('off')
+    setBpm(null)
+    setMsg('')
+  }
+
+  const zone = bpm ? hrZone(bpm, age) : null
+
+  return (
+    <Card className={status === 'on' ? 'border-acid/40' : ''}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">❤️ FC en vivo {deviceName && <span className="text-mut font-normal">· {deviceName}</span>}</div>
+          {status === 'on' && bpm && zone ? (
+            <div className="flex items-baseline gap-3 mt-1">
+              <span className="text-4xl font-black tabular-nums" style={{ color: zone.color }}>{bpm}</span>
+              <span className="text-sm text-mut">ppm</span>
+              <Chip tone="default">
+                <span style={{ color: zone.color }}>{zone.z} · {zone.label} ({Math.round(zone.pct * 100)}%)</span>
+              </Chip>
+            </div>
+          ) : (
+            <p className="text-xs text-mut mt-0.5">
+              Conecta tu Garmin como sensor Bluetooth y ve tus pulsaciones y zona aquí mientras entrenas.
+            </p>
+          )}
+        </div>
+        {status === 'on' ? (
+          <Button variant="ghost" className="!text-xs shrink-0" onClick={disconnect}>Desconectar</Button>
+        ) : (
+          <Button variant="ghost" className="!text-xs shrink-0" disabled={status === 'connecting'} onClick={connect}>
+            {status === 'connecting' ? 'Buscando...' : '📡 Conectar reloj'}
+          </Button>
+        )}
+      </div>
+      {msg && <p className="text-xs text-zinc-400 bg-card2 rounded-lg px-3 py-2 mt-2">{msg}</p>}
+    </Card>
   )
 }
 

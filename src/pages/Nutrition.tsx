@@ -248,7 +248,7 @@ function SuggestionCard({ date }: { date: string }) {
           ))}
           {rows.map(({ label, meal, recipe }) =>
             recipe ? (
-              <div key={label} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
+              <div key={`${label}-${recipe.id}`} className="flex items-center gap-2 bg-card2 rounded-lg px-3 py-2">
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] text-mut uppercase tracking-wider">{label}</div>
                   <div className="text-sm font-medium truncate">{recipe.name}</div>

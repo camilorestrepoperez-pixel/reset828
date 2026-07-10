@@ -109,6 +109,19 @@ export default function Dashboard() {
               <span>🍽</span>
               <span className="text-zinc-300 group-hover:text-acid transition">{mealLine}</span>
             </Link>
+            {(() => {
+              const run = s.sessions[today]?.cardio
+              if (!run?.time && !run?.distance) return null
+              const pace = run.pace ?? (run.time && run.distance ? (() => { const p = run.time / run.distance; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, '0')}` })() : null)
+              return (
+                <div className="text-xs mt-1.5 flex items-start gap-1.5">
+                  <span>🏃</span>
+                  <span className="text-acid font-semibold">
+                    Real: {run.time ? `${run.time} min` : ''}{run.distance ? ` · ${run.distance} km` : ''}{pace ? ` · ${pace}/km` : ''}{run.calories ? ` · ${run.calories} kcal` : ''} · {run.source ?? 'manual'}
+                  </span>
+                </div>
+              )
+            })()}
           </div>
           <div className="flex flex-col gap-2 shrink-0">
             <Link to="/entreno"><Button className="w-full !py-2 !text-xs">Ir al entreno</Button></Link>

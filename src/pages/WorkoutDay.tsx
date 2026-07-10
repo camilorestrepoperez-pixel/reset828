@@ -6,6 +6,7 @@ import { suggestLightDay } from '../services/garmin/garminHealthMapper'
 import { sendWorkoutToGarmin } from '../services/garmin/garminTrainingService'
 import { isSupported as bleSupported, connectHR, hrZone } from '../services/bluetoothHR'
 import { EXERCISE_LIBRARY, EXERCISE_CATS } from '../data/exerciseLibrary'
+import { unifiedActivities } from '../services/unifiedActivityService'
 import type { LibraryExercise } from '../types'
 import { buildMealSuggestion, DAY_TYPE_INFO } from '../lib/mealCoach'
 import { Card, Button, Chip, Modal, Input, Select, ProgressBar, Scale } from '../components/ui'
@@ -217,6 +218,7 @@ export default function WorkoutDay() {
                 <button className="flex-1 text-left min-w-0" onClick={() => setExpanded(open ? null : ex.id)}>
                   <div className={`font-semibold text-sm ${log.completed ? 'line-through text-mut' : ''}`}>{ex.name}</div>
                   <div className="text-xs text-mut flex items-center gap-2 flex-wrap mt-0.5">
+                    {ex.group && <Chip tone="warn">{ex.group}</Chip>}
                     <span>{ex.muscle}</span>·<span>{ex.sets}×{ex.reps}</span>·<span>desc. {ex.rest}</span>
                     {lastWeights.length > 0 && (
                       <Chip tone="acid">últ: {lastWeights.join('/')}kg</Chip>
@@ -287,24 +289,30 @@ export default function WorkoutDay() {
                   )}
 
                   {!isStrength && (
-                    <Input
-                      label="Registro (tiempo, distancia, sensación)"
-                      placeholder="Ej: 5.2 km en 32 min, me sentí 7/10"
-                      value={log.notes ?? ''}
-                      onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, notes: e.target.value })}
-                    />
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input label="Tiempo (min)" type="number" inputMode="decimal" value={log.time ?? ''} onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, time: e.target.value === '' ? undefined : +e.target.value })} />
+                        <Input label="Distancia (km)" type="number" inputMode="decimal" step="0.1" value={log.distance ?? ''} onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, distance: e.target.value === '' ? undefined : +e.target.value })} />
+                        <Input label="Calorías" type="number" inputMode="numeric" value={log.calories ?? ''} onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, calories: e.target.value === '' ? undefined : +e.target.value })} />
+                      </div>
+                      {log.time && log.distance ? (
+                        <p className="text-xs bg-acid/10 text-acid rounded-lg px-3 py-2 font-semibold">
+                          🏃 {log.time} min · {log.distance} km · pace {(() => { const p = log.time! / log.distance!; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, '0')}` })()}/km{log.calories ? ` · ${log.calories} kcal` : ''} · Manual
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-mut">Con tiempo + distancia calculo el pace automáticamente.</p>
+                      )}
+                    </div>
                   )}
 
                   <Scale label="RPE — esfuerzo percibido" value={log.rpe} onChange={(v) => s.saveExerciseLog(date, day.key, ex.id, { ...log, rpe: v })} />
 
-                  {isStrength && (
-                    <Input
-                      label="Notas"
-                      placeholder="Sensaciones, técnica, molestias..."
-                      value={log.notes ?? ''}
-                      onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, notes: e.target.value })}
-                    />
-                  )}
+                  <Input
+                    label="Notas"
+                    placeholder="Sensaciones, técnica, molestias..."
+                    value={log.notes ?? ''}
+                    onChange={(e) => s.saveExerciseLog(date, day.key, ex.id, { ...log, notes: e.target.value })}
+                  />
 
                   <div className="flex gap-2 flex-wrap">
                     <Button variant="ghost" className="!py-1.5 !text-xs" onClick={() => setEditEx(ex)}>Editar</Button>
@@ -411,8 +419,12 @@ export default function WorkoutDay() {
       {/* FC en vivo desde el reloj (Web Bluetooth) */}
       <LiveHRCard age={s.profile.age} />
 
-      {/* Registro de cardio del día */}
-      {isCardioDay && <CardioCard date={date} dayKey={day.key} />}
+      {/* Registro de running/cardio del día — siempre disponible, aunque no estuviera en el plan */}
+      <CardioCard
+        date={date}
+        dayKey={day.key}
+        target={isCardioDay ? day.exercises.find((e) => e.type === 'cardio' && (e.block ?? '') === 'principal')?.reps : undefined}
+      />
 
       <ExerciseModal
         open={!!editEx || showAdd}
@@ -511,10 +523,20 @@ function LiveHRCard({ age }: { age: number }) {
   )
 }
 
-function CardioCard({ date, dayKey }: { date: string; dayKey: string }) {
+function CardioCard({ date, dayKey, target }: { date: string; dayKey: string; target?: string }) {
   const s = useStore()
   const cardio = s.sessions[date]?.cardio ?? {}
-  const upd = (patch: Partial<typeof cardio>) => s.saveCardio(date, dayKey, { ...cardio, ...patch })
+  // Si el dato venía sincronizado y el usuario lo edita → manual override
+  const upd = (patch: Partial<typeof cardio>) => {
+    const source: typeof cardio.source =
+      cardio.source && cardio.source !== 'manual' && cardio.source !== 'manual override'
+        ? 'manual override'
+        : cardio.source ?? 'manual'
+    s.saveCardio(date, dayKey, { ...cardio, ...patch, source })
+  }
+
+  // Actividad sincronizada del día (Garmin/Strava/Apple) para prellenar
+  const synced = unifiedActs({ s }).find((a) => a.date === date && (a.type === 'running' || a.type === 'walking') && a.source !== 'manual')
 
   // Pace automático si hay tiempo y distancia (editable manualmente)
   const autoPace =
@@ -524,35 +546,66 @@ function CardioCard({ date, dayKey }: { date: string; dayKey: string }) {
           return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, '0')}`
         })()
       : ''
+  const hasData = !!(cardio.time || cardio.distance)
 
   return (
-    <Card>
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-semibold">🏃 Registro de cardio</span>
-        <span className="text-[10px] text-mut">Fuente: manual (Garmin/Strava vía Conexiones)</span>
+    <Card className={hasData ? 'border-acid/30' : ''}>
+      <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+        <span className="text-sm font-semibold">🏃 Running / cardio de hoy {target && <span className="text-mut font-normal">· objetivo: {target}</span>}</span>
+        <span className="text-[10px] text-mut">Fuente: {cardio.source ?? 'manual'}</span>
+      </div>
+      <p className="text-[11px] text-mut mb-3">¿Trotaste o caminaste hoy? Regístralo aquí aunque no estuviera en el plan.</p>
+
+      {synced && !hasData && (
+        <button
+          className="w-full text-left text-xs bg-card2 rounded-lg px-3 py-2 mb-3 hover:border-acid/40 border border-transparent transition"
+          onClick={() => s.saveCardio(date, dayKey, {
+            ...cardio,
+            time: synced.durationMin,
+            distance: synced.distanceKm,
+            calories: synced.calories,
+            avgHR: synced.avgHR,
+            pace: synced.paceMinKm,
+            source: synced.source as typeof cardio.source,
+          })}
+        >
+          📡 Sincronizado ({synced.source}): <b>{synced.name}</b> — {synced.durationMin} min{synced.distanceKm ? ` · ${synced.distanceKm} km` : ''}. <span className="text-acid font-semibold">Tocar para usar estos datos →</span>
+        </button>
+      )}
+
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <Input label="Tiempo (min)" type="number" inputMode="decimal" value={cardio.time ?? ''} onChange={(e) => upd({ time: e.target.value === '' ? undefined : +e.target.value })} />
+        <Input label="Distancia (km)" type="number" inputMode="decimal" step="0.1" value={cardio.distance ?? ''} onChange={(e) => upd({ distance: e.target.value === '' ? undefined : +e.target.value })} />
+        <Input label="Ritmo (min/km)" placeholder={autoPace || 'auto'} value={cardio.pace ?? ''} onChange={(e) => upd({ pace: e.target.value })} />
       </div>
       <div className="grid grid-cols-3 gap-2 mb-2">
-        <Input label="Distancia (km)" type="number" inputMode="decimal" step="0.1" value={cardio.distance ?? ''} onChange={(e) => upd({ distance: e.target.value === '' ? undefined : +e.target.value })} />
-        <Input label="Tiempo (min)" type="number" inputMode="numeric" value={cardio.time ?? ''} onChange={(e) => upd({ time: e.target.value === '' ? undefined : +e.target.value })} />
-        <Input label="Ritmo (min/km)" placeholder={autoPace || '6:10'} value={cardio.pace ?? ''} onChange={(e) => upd({ pace: e.target.value })} />
-      </div>
-      {autoPace && !cardio.pace && (
-        <p className="text-[11px] text-mut mb-2">Ritmo calculado: <b className="text-acid">{autoPace} min/km</b> (escribe para corregirlo)</p>
-      )}
-      <div className="grid grid-cols-3 gap-2 mb-3">
         <Input label="Calorías quemadas" type="number" inputMode="numeric" placeholder="del reloj" value={cardio.calories ?? ''} onChange={(e) => upd({ calories: e.target.value === '' ? undefined : +e.target.value })} />
         <Input label="FC promedio" type="number" inputMode="numeric" placeholder="ppm" value={cardio.avgHR ?? ''} onChange={(e) => upd({ avgHR: e.target.value === '' ? undefined : +e.target.value })} />
         <Select label="Tipo de sesión" value={cardio.sessionType ?? ''} onChange={(e) => upd({ sessionType: (e.target.value || undefined) as typeof cardio.sessionType })}>
           <option value="">—</option>
+          <option value="trote suave">Trote suave</option>
           <option value="zona 2">Zona 2</option>
           <option value="intervalos">Intervalos</option>
+          <option value="caminata rápida">Caminata rápida</option>
+          <option value="running libre">Running libre</option>
           <option value="largo suave">Largo suave</option>
-          <option value="libre">Libre</option>
         </Select>
       </div>
+
+      {hasData && (
+        <p className="text-sm bg-acid/10 text-acid rounded-lg px-3 py-2 mb-3 font-bold">
+          {cardio.time ? `${cardio.time} min` : '—'}{cardio.distance ? ` · ${cardio.distance} km` : ''}{(cardio.pace || autoPace) ? ` · pace ${cardio.pace || autoPace}/km` : ''}{cardio.calories ? ` · ${cardio.calories} kcal` : ''} · {(cardio.source ?? 'manual')[0].toUpperCase() + (cardio.source ?? 'manual').slice(1)}
+        </p>
+      )}
+
       <Scale label="Sensación (1 = fatal, 10 = volando)" value={cardio.feel} onChange={(v) => upd({ feel: v })} />
     </Card>
   )
+}
+
+// helper local para no repetir la llamada al servicio unificado
+function unifiedActs({ s }: { s: ReturnType<typeof useStore.getState> }) {
+  return unifiedActivities({ garmin: s.garmin, strava: s.strava, apple: s.apple, sessions: s.sessions, plan: s.plan })
 }
 
 // Selector de ejercicios de la biblioteca (~120): buscar, filtrar, agregar o reemplazar

@@ -44,6 +44,7 @@ export interface Exercise {
   type: ExerciseType
   block?: BlockType // bloque dentro de la sesión (default: principal)
   estMin?: number // minutos estimados del ejercicio completo
+  group?: string // agrupa ejercicios de un circuito/superserie (cada uno se registra aparte)
 }
 
 export interface WorkoutDay {
@@ -65,7 +66,14 @@ export interface ExerciseLog {
   sets: SetLog[]
   rpe?: number
   notes?: string
+  // registro estructurado para ejercicios de cardio/running
+  time?: number // min
+  distance?: number // km
+  calories?: number
 }
+
+export type RunSessionType = 'trote suave' | 'zona 2' | 'intervalos' | 'caminata rápida' | 'running libre' | 'largo suave'
+export type DataSource = 'manual' | 'garmin' | 'strava' | 'apple' | 'manual override'
 
 export interface CardioLog {
   distance?: number
@@ -74,7 +82,8 @@ export interface CardioLog {
   feel?: number
   calories?: number
   avgHR?: number
-  sessionType?: 'zona 2' | 'intervalos' | 'largo suave' | 'libre'
+  sessionType?: RunSessionType | 'libre'
+  source?: DataSource
 }
 
 export type SessionMode = 'normal' | 'rapida' | 'ligera'

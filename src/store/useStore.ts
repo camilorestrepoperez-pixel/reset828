@@ -298,12 +298,13 @@ export const useStore = create<State>()(
     }),
     {
       name: 'reset78-store',
-      version: 2,
-      // v2: el plan de entrenamiento pasó a bloques con tiempos (≤75 min).
-      // Se reemplaza el plan guardado por el nuevo; el resto de datos queda intacto.
+      version: 3,
+      // v2: plan por bloques con tiempos (≤75 min).
+      // v3: circuitos/superseries separados en ejercicios individuales (con `group`).
+      // Cada migración reemplaza el plan guardado; el resto de datos queda intacto.
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Partial<State>
-        if (version < 2) return { ...state, plan: WORKOUT_PLAN }
+        if (version < 3) return { ...state, plan: WORKOUT_PLAN }
         return state
       },
     },

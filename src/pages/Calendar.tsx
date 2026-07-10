@@ -211,7 +211,7 @@ function DayDetailModal({ date, onClose }: { date: string | null; onClose: () =>
               <div className="text-xs text-mut uppercase tracking-wider mb-1">Actividad real</div>
               {acts.map((a) => (
                 <div key={a.id} className="text-xs text-zinc-300">
-                  {a.name} · {a.durationMin} min{a.distanceKm ? ` · ${a.distanceKm} km` : ''}{a.calories ? ` · ${a.calories} kcal` : ''} · {SOURCE_META[a.source].icon}
+                  {a.name} · {a.durationMin} min{a.distanceKm ? ` · ${a.distanceKm} km` : ''}{a.paceMinKm ? ` · ${a.paceMinKm}/km` : ''}{a.calories ? ` · ${a.calories} kcal` : ''} · {SOURCE_META[a.source].icon} {SOURCE_META[a.source].label}
                 </div>
               ))}
               {m.steps !== undefined && (

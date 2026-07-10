@@ -338,6 +338,77 @@ export default function Progress() {
         )
       })()}
 
+      {/* Running */}
+      {(() => {
+        const runs = activities.filter((a) => a.type === 'running' && a.durationMin > 0)
+        if (runs.length === 0) {
+          return (
+            <Card>
+              <CardTitle>Running</CardTitle>
+              <p className="text-sm text-mut py-3 text-center">
+                Registra tiempo y distancia en tus trotes (Entreno → "Running / cardio de hoy")<br />para ver tus gráficas de running aquí.
+              </p>
+            </Card>
+          )
+        }
+        // por semana (últimas 4)
+        const weekRows = Array.from({ length: 4 }, (_, i) => {
+          const start = addDays(weekStart(today), -7 * (3 - i))
+          const end = addDays(start, 6)
+          const wr = runs.filter((r) => r.date >= start && r.date <= end)
+          const km = Math.round(wr.reduce((a, r) => a + (r.distanceKm ?? 0), 0) * 10) / 10
+          const min = wr.reduce((a, r) => a + r.durationMin, 0)
+          const pace = km > 0 ? min / km : 0
+          return {
+            label: i === 3 ? 'Esta semana' : `Hace ${3 - i} sem`,
+            km, min, sesiones: wr.length,
+            pace: pace > 0 ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, '0')}` : '—',
+          }
+        })
+        const withKm = runs.filter((r) => r.distanceKm)
+        const longest = withKm.length ? withKm.reduce((a, b) => ((a.distanceKm ?? 0) > (b.distanceKm ?? 0) ? a : b)) : null
+        const best = withKm
+          .map((r) => ({ r, p: r.durationMin / (r.distanceKm ?? 1) }))
+          .filter((x) => x.p > 2.5) // descarta datos absurdos
+          .sort((a, b) => a.p - b.p)[0]
+        const totalKcal = runs.reduce((a, r) => a + (r.calories ?? 0), 0)
+        return (
+          <Card>
+            <CardTitle>Running</CardTitle>
+            <div className="overflow-x-auto mb-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[11px] text-mut uppercase tracking-wider">
+                    <th className="text-left py-1.5 font-medium">Semana</th>
+                    <th className="text-right font-medium">Km</th>
+                    <th className="text-right font-medium">Tiempo</th>
+                    <th className="text-right font-medium">Pace prom.</th>
+                    <th className="text-right font-medium">Sesiones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weekRows.map((w) => (
+                    <tr key={w.label} className="border-t border-line/60">
+                      <td className="py-2">{w.label}</td>
+                      <td className="text-right font-semibold">{w.km || '—'}</td>
+                      <td className="text-right">{w.min ? `${w.min} min` : '—'}</td>
+                      <td className="text-right">{w.pace}</td>
+                      <td className="text-right">{w.sesiones || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {longest && <Chip tone="acid">🏆 Más largo: {longest.distanceKm} km ({longest.date.slice(5)})</Chip>}
+              {best && <Chip tone="ok">⚡ Mejor pace: {`${Math.floor(best.p)}:${String(Math.round((best.p % 1) * 60)).padStart(2, '0')}`}/km</Chip>}
+              {totalKcal > 0 && <Chip>🔥 {totalKcal} kcal corriendo</Chip>}
+              <Chip>{runs.length} sesiones totales</Chip>
+            </div>
+          </Card>
+        )
+      })()}
+
       {/* Plan vs realizado */}
       <Card>
         <CardTitle>Plan vs realizado — últimos 7 días</CardTitle>

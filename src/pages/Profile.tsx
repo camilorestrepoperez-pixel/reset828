@@ -126,6 +126,19 @@ export default function Profile() {
                   <div className="text-[11px] text-mut">a {plan.rateRange} · ~{plan.etaLabel}</div>
                 </div>
               </div>
+              {(() => {
+                const h2 = (p.height / 100) ** 2
+                const lo = Math.round(18.5 * h2)
+                const hi = Math.round(24.9 * h2)
+                const sugerido = Math.round(23 * h2) // IMC 23: punto medio-sano realista
+                return (
+                  <p className="text-xs text-mut mb-2">
+                    Rango de peso saludable para tu altura: <b className="text-zinc-300">{lo}–{hi} kg</b>.
+                    Peso sugerido realista: <b className="text-acid">{sugerido} kg</b> (IMC 23) —
+                    tu meta de {p.goalWeight} kg {p.goalWeight >= lo && p.goalWeight <= hi ? 'está dentro del rango. Bien puesta.' : 'queda fuera del rango; revísala al llegar.'}
+                  </p>
+                )
+              })()}
               {alerts.map((a, i) => (
                 <p key={i} className="text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2 mb-1.5">▲ {a}</p>
               ))}

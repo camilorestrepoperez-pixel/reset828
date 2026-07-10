@@ -29,20 +29,29 @@ export function unifiedActivities(opts: {
   // Strava y Apple ya vienen unificadas
   all.push(...strava.activities, ...apple.activities)
 
-  // Manual: sesiones terminadas en la app
+  // Manual: sesiones terminadas O con cardio registrado (un trote cuenta aunque
+  // no hayas marcado "terminar sesión")
   for (const sess of Object.values(sessions)) {
-    if (!sess.done) continue
+    const hasRun = !!(sess.cardio?.time || sess.cardio?.distance)
+    if (!sess.done && !hasRun) continue
     const day = plan.find((d) => d.key === sess.dayKey)
-    const isRun = !!sess.cardio?.distance
+    const autoPace =
+      sess.cardio?.time && sess.cardio?.distance
+        ? (() => { const p = sess.cardio!.time! / sess.cardio!.distance!; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, '0')}` })()
+        : undefined
     all.push({
       id: `manual-${sess.date}`,
       date: sess.date,
       source: 'manual',
-      type: isRun ? 'running' : day?.exercises.some((e) => e.type === 'funcional') ? 'functional' : 'strength',
-      name: day?.title ?? 'Entreno RESET 828',
+      type: hasRun ? (sess.cardio?.sessionType === 'caminata rápida' ? 'walking' : 'running') : day?.exercises.some((e) => e.type === 'funcional') ? 'functional' : 'strength',
+      name: hasRun
+        ? `${sess.cardio?.sessionType ? sess.cardio.sessionType[0].toUpperCase() + sess.cardio.sessionType.slice(1) : 'Running'}`
+        : day?.title ?? 'Entreno RESET 828',
       durationMin: sess.cardio?.time ?? day?.exercises.reduce((a, e) => a + (e.estMin ?? 8), 0) ?? 60,
       distanceKm: sess.cardio?.distance,
-      paceMinKm: sess.cardio?.pace,
+      paceMinKm: sess.cardio?.pace ?? autoPace,
+      avgHR: sess.cardio?.avgHR,
+      calories: sess.cardio?.calories,
     })
   }
 

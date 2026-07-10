@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useStore, currentWeight } from '../store/useStore'
 import { calcTargets } from '../lib/calc'
-import { bmi, bmiClass, lossPlan, deficitAlerts, goalRecommendations } from '../lib/body'
-import { Card, CardTitle, Input, Select, Button, Scale } from '../components/ui'
+import { bmi, bmiClass, lossPlan, deficitAlerts, goalRecommendations, recommendedWeight, coachDiagnosis } from '../lib/body'
+import { Card, CardTitle, Input, Select, Button, Scale, Chip } from '../components/ui'
 import type { Profile as ProfileType } from '../types'
 
 export default function Profile() {
@@ -127,16 +127,28 @@ export default function Profile() {
                 </div>
               </div>
               {(() => {
-                const h2 = (p.height / 100) ** 2
-                const lo = Math.round(18.5 * h2)
-                const hi = Math.round(24.9 * h2)
-                const sugerido = Math.round(23 * h2) // IMC 23: punto medio-sano realista
+                const range = recommendedWeight(p)
                 return (
-                  <p className="text-xs text-mut mb-2">
-                    Rango de peso saludable para tu altura: <b className="text-zinc-300">{lo}–{hi} kg</b>.
-                    Peso sugerido realista: <b className="text-acid">{sugerido} kg</b> (IMC 23) —
-                    tu meta de {p.goalWeight} kg {p.goalWeight >= lo && p.goalWeight <= hi ? 'está dentro del rango. Bien puesta.' : 'queda fuera del rango; revísala al llegar.'}
-                  </p>
+                  <>
+                    {/* Tres pesos comparados: saludable · tu meta · recomendado */}
+                    <div className="grid grid-cols-3 gap-2 text-center mb-2">
+                      <div className="bg-card2 rounded-xl p-2.5">
+                        <div className="text-sm font-black text-emerald-400">{range.healthyLo}–{range.healthyHi}</div>
+                        <div className="text-[10px] text-mut">Rango saludable</div>
+                      </div>
+                      <div className="bg-card2 rounded-xl p-2.5">
+                        <div className="text-sm font-black">{p.goalWeight} kg</div>
+                        <div className="text-[10px] text-mut">Tu meta</div>
+                      </div>
+                      <div className="bg-acid/10 border border-acid/30 rounded-xl p-2.5">
+                        <div className="text-sm font-black text-acid">{range.recLo}–{range.recHi}</div>
+                        <div className="text-[10px] text-mut">Recomendado coach</div>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-mut mb-2">
+                      El rango recomendado (IMC 22–24) es más realista que el mínimo saludable: si entrenas fuerza, el músculo pesa. No hay un “peso perfecto”, hay un rango sano.
+                    </p>
+                  </>
                 )
               })()}
               {alerts.map((a, i) => (
@@ -150,6 +162,39 @@ export default function Profile() {
           )
         })()}
       </Card>
+
+      {/* Diagnóstico coach */}
+      {(() => {
+        const dx = coachDiagnosis(p, weight, targets)
+        const tone = dx.verdict === 'razonable' ? 'ok' : dx.verdict === 'agresivo' || dx.verdict === 'bajo-peso' ? 'warn' : 'acid'
+        const rows: { label: string; text: string }[] = [
+          { label: 'Objetivo recomendado', text: dx.goalAssessment },
+          { label: 'Estrategia sugerida', text: dx.strategy },
+          { label: 'Ritmo recomendado', text: dx.pace },
+          { label: 'Enfoque de entrenamiento', text: dx.trainingFocus },
+          { label: 'Enfoque nutricional', text: dx.nutritionFocus },
+          { label: 'Próximo ajuste', text: dx.nextAdjustment },
+        ]
+        return (
+          <Card className="border-acid/30">
+            <CardTitle right={<Chip tone={tone}>Objetivo {dx.verdict}</Chip>}>🧭 Diagnóstico coach</CardTitle>
+            <div className="space-y-2.5">
+              {rows.map((r) => (
+                <div key={r.label}>
+                  <div className="text-[10px] text-mut uppercase tracking-wider">{r.label}</div>
+                  <div className="text-sm text-zinc-300">{r.text}</div>
+                </div>
+              ))}
+              <div>
+                <div className="text-[10px] text-amber-400 uppercase tracking-wider mb-1">Riesgos y alertas</div>
+                {dx.risks.map((rk, i) => (
+                  <p key={i} className="text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2 mb-1">▲ {rk}</p>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )
+      })()}
 
       {/* Cálculo en vivo */}
       <Card className="border-acid/30">

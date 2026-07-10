@@ -15,6 +15,13 @@ import { Card, CardTitle, Button, Chip } from '../components/ui'
 const fmtSync = (iso?: string) =>
   iso ? new Date(iso).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Nunca'
 
+// Datos que RESET 828 solicita autorización para sincronizar
+const GARMIN_PERMISSIONS = [
+  '👟 Pasos', '😴 Sueño', '❤️ Frecuencia cardiaca', '🧠 Estrés',
+  '🔋 Body Battery', '🔥 Calorías activas', '🏃 Actividades deportivas',
+  '📏 Distancia', '⏱️ Tiempo y ritmo', '🏋️ Entrenamientos',
+]
+
 function ConnectionCard({ title, icon, connected, demo, lastSync, msg, children, extra }: {
   title: string; icon: string; connected: boolean; demo: boolean; lastSync?: string; msg?: string
   children: ReactNode; extra?: ReactNode
@@ -43,6 +50,7 @@ export default function Garmin() {
   const [gMsg, setGMsg] = useState('')
   const [stMsg, setStMsg] = useState('')
   const [apMsg, setApMsg] = useState('')
+  const [gConsent, setGConsent] = useState(false) // pantalla de autorización visible
   const today = todayStr()
   const todayData = s.garmin.daily[today]
   const recovery = recoveryStatus(todayData)
@@ -51,8 +59,16 @@ export default function Garmin() {
 
   // ---- Garmin ----
   const gConnect = async () => {
-    const res = await garminAuth.connect()
-    if (!res.ok) setGMsg(res.message)
+    if (garminAuth.isConfigured()) {
+      // OAuth real: redirige a Garmin
+      const res = await garminAuth.connect()
+      if (!res.ok) setGMsg(res.message)
+      return
+    }
+    // Sin credenciales: caemos a demo con aviso, como fallback
+    s.setGarminDemo(true)
+    setGConsent(false)
+    setGMsg('Faltan credenciales Garmin. Activé el modo demo para que pruebes el flujo — la app queda lista para conexión real cuando se configuren. Dale a "Sincronizar".')
   }
   const gSync = async () => {
     setBusy(true); setGMsg('Sincronizando...')
@@ -131,22 +147,59 @@ export default function Garmin() {
         lastSync={s.garmin.lastSync} msg={gMsg}
         extra={
           <>
-            {!garminAuth.isConfigured() && !s.garmin.demo && (
-              <p className="text-xs text-mut mt-3">
-                Conexión real: Health API + Activity API + Training API (OAuth2 PKCE). Requiere{' '}
-                <code className="text-zinc-400">VITE_GARMIN_CLIENT_ID</code>, <code className="text-zinc-400">VITE_GARMIN_CLIENT_SECRET</code> (en backend),{' '}
-                <code className="text-zinc-400">VITE_GARMIN_REDIRECT_URI</code> y <code className="text-zinc-400">VITE_GARMIN_TOKEN_PROXY</code>.
-              </p>
-            )}
-            {s.garmin.connected && (
-              <div className="flex gap-2 flex-wrap mt-3 pt-3 border-t border-line/60">
-                <Button variant="ghost" className="!text-xs" disabled={busy} onClick={gSendToday}>
-                  {s.garminSent[today] ? '✓ Entreno enviado hoy' : '📤 Enviar entreno de hoy'}
-                </Button>
-                <Button variant="ghost" className="!text-xs" disabled={busy} onClick={gSendWeek}>📅 Enviar plan semanal</Button>
+            {/* Pantalla de autorización explícita (antes de conectar) */}
+            {gConsent && !s.garmin.connected && (
+              <div className="mt-3 pt-3 border-t border-line/60 space-y-3">
+                <p className="text-sm text-zinc-300">
+                  Para sincronizar pasos, sueño, actividades, calorías, frecuencia cardiaca y entrenamientos,
+                  RESET 828 necesita <b>autorización de tu cuenta Garmin</b>. Nada se sincroniza sin tu permiso,
+                  y puedes desconectar cuando quieras.
+                </p>
+                <div>
+                  <div className="text-[10px] text-mut uppercase tracking-wider mb-1.5">Datos que se solicitan</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {GARMIN_PERMISSIONS.map((perm) => (
+                      <span key={perm} className="text-[11px] bg-card2 border border-line rounded-full px-2.5 py-1">{perm}</span>
+                    ))}
+                  </div>
+                </div>
+                {!garminAuth.isConfigured() && (
+                  <p className="text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">
+                    ⚠️ Faltan credenciales Garmin. La app queda lista para conexión real cuando se configuren
+                    (<code>VITE_GARMIN_CLIENT_ID</code>, <code>VITE_GARMIN_REDIRECT_URI</code>, <code>VITE_GARMIN_TOKEN_PROXY</code>).
+                    Mientras tanto puedes usar el modo demo.
+                  </p>
+                )}
+                <div className="flex gap-2 flex-wrap">
+                  <Button disabled={busy} onClick={gConnect}>Autorizar y conectar</Button>
+                  <Button variant="ghost" onClick={() => { setGConsent(false); s.setGarminDemo(true) }}>Usar modo manual / demo</Button>
+                  <Button variant="ghost" onClick={() => setGConsent(false)}>Cancelar</Button>
+                </div>
               </div>
             )}
-            {/* Importación manual: la vía gratis sin API */}
+
+            {/* Enviar entrenos a Garmin */}
+            <div className="flex gap-2 flex-wrap mt-3 pt-3 border-t border-line/60">
+              {s.garmin.connected ? (
+                <>
+                  <Button variant="ghost" className="!text-xs" disabled={busy} onClick={gSendToday}>
+                    {s.garminSent[today] ? '✓ Entreno enviado hoy' : '📤 Enviar entreno de hoy'}
+                  </Button>
+                  <Button variant="ghost" className="!text-xs" disabled={busy} onClick={gSendWeek}>📅 Enviar plan semanal</Button>
+                  {!garminAuth.isConfigured() && (
+                    <p className="w-full text-[11px] text-mut mt-1">
+                      Función preparada. El envío real requiere credenciales oficiales de la Garmin Training API.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <Button variant="ghost" className="!text-xs" disabled onClick={() => {}}>
+                  📤 Conecta Garmin para enviar entrenamientos
+                </Button>
+              )}
+            </div>
+
+            {/* Importación manual: la vía gratis sin API (fallback siempre disponible) */}
             <div className="mt-3 pt-3 border-t border-line/60">
               <label className="inline-block rounded-xl px-4 py-2 text-xs font-semibold bg-card2 text-zinc-200 border border-line hover:border-acid/50 cursor-pointer transition">
                 📥 Importar CSV de Garmin Connect
@@ -158,18 +211,21 @@ export default function Garmin() {
                 />
               </label>
               <p className="text-[11px] text-mut mt-1.5">
-                Gratis y sin API: en <b>connect.garmin.com</b> → Actividades → Todas las actividades → Exportar CSV.
+                Registro manual siempre disponible, con o sin Garmin: en <b>connect.garmin.com</b> → Actividades → Exportar CSV.
                 Tus entrenos reales entran a "Plan vs realizado" y Progreso.
               </p>
             </div>
           </>
         }
       >
-        {!s.garmin.demo && <Button variant="ghost" disabled={busy} onClick={gConnect}>Conectar Garmin</Button>}
-        <Button variant={s.garmin.demo ? 'danger' : 'ghost'} onClick={() => s.setGarminDemo(!s.garmin.demo)}>
-          {s.garmin.demo ? 'Salir de demo' : 'Modo demo'}
-        </Button>
-        {s.garmin.connected && <Button disabled={busy} onClick={gSync}>⟳ Sincronizar</Button>}
+        {s.garmin.connected ? (
+          <>
+            <Button disabled={busy} onClick={gSync}>⟳ Sincronizar</Button>
+            <Button variant="danger" onClick={() => { s.disconnectGarmin(); setGMsg('Garmin desconectado. Tus datos manuales siguen intactos.') }}>Desconectar</Button>
+          </>
+        ) : (
+          <Button onClick={() => setGConsent(true)}>Conectar Garmin</Button>
+        )}
       </ConnectionCard>
 
       {/* Hoy según Garmin */}
